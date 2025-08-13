@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "541561855172",
+    "project_id": "rsr-test-23cb0",
+    "storage_bucket": "rsr-test-23cb0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:541561855172:android:30f44e1478b5c648983d91",
+        "android_client_info": {
+          "package_name": "com.example.rsrtest"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCicuND2k2ePj2v-xiZZmRUEPHc0a5XGA4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
