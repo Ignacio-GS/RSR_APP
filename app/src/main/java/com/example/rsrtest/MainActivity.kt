@@ -23,6 +23,9 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -40,6 +43,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +69,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.example.rsrtest.ui.theme.RSRTESTTheme
+import com.example.rsrtest.data.*
+import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.common.util.concurrent.ListenableFuture
@@ -83,7 +95,7 @@ data class DetectedProduct(
     val id: String = UUID.randomUUID().toString()
 )
 
-// Elemento del carrito de compras
+// Elemento del carrito de compras (legacy - reemplazado por CartItemWithProduct)
 data class CartItem(
     val name: String,
     val quantity: Int = 1
@@ -154,6 +166,10 @@ class MainActivity : ComponentActivity() {
     // Camera Executor
     private lateinit var cameraExecutor: ExecutorService
 
+    // Room Database
+    private lateinit var database: AppDatabase
+    private lateinit var productRepository: ProductRepository
+
     // ML Kit Object Detector
     private val objectDetector by lazy {
         val options = ObjectDetectorOptions.Builder()
@@ -176,11 +192,34 @@ class MainActivity : ComponentActivity() {
     private val _detectionCount = MutableStateFlow(0)
     val detectionCount: StateFlow<Int> = _detectionCount.asStateFlow()
 
-    // Carrito de compras
+    // Carrito de compras (legacy)
     private val _cartItems = MutableStateFlow<List<CartItem>>(emptyList())
     val cartItems: StateFlow<List<CartItem>> = _cartItems.asStateFlow()
 
+    // Carrito de compras con Room
+    private val _cartItemsRoom = MutableStateFlow<List<CartItemWithProduct>>(emptyList())
+    val cartItemsRoom: StateFlow<List<CartItemWithProduct>> = _cartItemsRoom.asStateFlow()
+
+    // Navegación
+    private val _currentScreen = MutableStateFlow("scanner")
+    val currentScreen: StateFlow<String> = _currentScreen.asStateFlow()
+
+    // Búsqueda y filtros
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _selectedCategory = MutableStateFlow<String?>(null)
+    val selectedCategory: StateFlow<String?> = _selectedCategory.asStateFlow()
+
+    private val _filteredProducts = MutableStateFlow<List<Product>>(emptyList())
+    val filteredProducts: StateFlow<List<Product>> = _filteredProducts.asStateFlow()
+
+    // Historial de compras
+    private val _purchaseHistory = MutableStateFlow<List<PurchaseHistory>>(emptyList())
+    val purchaseHistory: StateFlow<List<PurchaseHistory>> = _purchaseHistory.asStateFlow()
+
     private fun addToCart(productName: String) {
+        // Método legacy
         val current = _cartItems.value.toMutableList()
         val index = current.indexOfFirst { it.name == productName }
         if (index >= 0) {
@@ -190,9 +229,19 @@ class MainActivity : ComponentActivity() {
             current.add(CartItem(productName, 1))
         }
         _cartItems.value = current
+
+        // Método con Room
+        lifecycleScope.launch {
+            val product = productRepository.findProductByDetectionKeyword(productName.lowercase())
+            product?.let {
+                productRepository.addToCart(it.id)
+                Log.d("Cart", "Agregado al carrito: ${it.name}")
+            }
+        }
     }
 
     private fun updateCartItem(productName: String, delta: Int) {
+        // Método legacy
         val current = _cartItems.value.toMutableList()
         val index = current.indexOfFirst { it.name == productName }
         if (index >= 0) {
@@ -207,62 +256,87 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Nuevos métodos para Room
+    private fun updateCartItemRoom(cartItem: CartItemWithProduct, delta: Int) {
+        lifecycleScope.launch {
+            val newQuantity = cartItem.quantity + delta
+            productRepository.updateCartItemQuantity(cartItem.product.id, newQuantity)
+        }
+    }
+
     private fun removeFromCart(productName: String) {
+        // Método legacy
         val current = _cartItems.value.toMutableList()
         current.removeAll { it.name == productName }
         _cartItems.value = current
+    }
+
+    private fun removeFromCartRoom(cartItem: CartItemWithProduct) {
+        lifecycleScope.launch {
+            productRepository.removeFromCart(cartItem.product.id)
+        }
     }
 
     // Estado del permiso de cámara
     private val _hasCameraPermission = MutableStateFlow(false)
     val hasCameraPermission: StateFlow<Boolean> = _hasCameraPermission.asStateFlow()
 
-    // Lista de productos PepsiCo con categorías
-    private val pepsicoProducts = mapOf(
-        // Bebidas
-        "pepsi" to "Pepsi",
-        "coca cola" to "Bebida Cola",
-        "bottle" to "Bebida Embotellada",
-        "can" to "Bebida Enlatada",
-        "soda" to "Refresco",
-        "beverage" to "Bebida",
-        "7up" to "7UP",
-        "mirinda" to "Mirinda",
-        "mountain dew" to "Mountain Dew",
-        "gatorade" to "Gatorade",
-        "tropicana" to "Tropicana",
-        "aquafina" to "Aquafina",
-        "lipton" to "Lipton",
-        "h2oh" to "H2OH!",
-        "manzanita" to "Manzanita Sol",
+    // Inicializar datos de productos en Room
+    private fun initializeProductData() {
+        lifecycleScope.launch {
+            // Verificar si ya hay productos en la base de datos
+            val existingProducts = database.productDao().getAllProducts()
+            existingProducts.collect { products ->
+                if (products.isEmpty()) {
+                    // Insertar productos iniciales
+                    productRepository.insertProducts(ProductData.getAllPepsiCoProducts())
+                    Log.d("ProductInit", "Productos inicializados: ${ProductData.getAllPepsiCoProducts().size}")
+                } else {
+                    // Inicializar productos filtrados
+                    _filteredProducts.value = products
+                }
+            }
+        }
+    }
 
-        // Snacks
-        "chips" to "Papas Fritas",
-        "doritos" to "Doritos",
-        "cheetos" to "Cheetos",
-        "lays" to "Lay's",
-        "ruffles" to "Ruffles",
-        "sabritas" to "Sabritas",
-        "fritos" to "Fritos",
-        "tostitos" to "Tostitos",
-        "takis" to "Takis",
-        "chip bag" to "Bolsa de Papas",
-        "snack" to "Botana",
+    private fun updateFilteredProducts() {
+        lifecycleScope.launch {
+            val query = _searchQuery.value
+            val category = _selectedCategory.value
+            
+            val products = if (query.isBlank() && category == null) {
+                productRepository.getAllProducts()
+            } else if (query.isNotBlank() && category != null) {
+                productRepository.searchProducts(query).also {
+                    // Filter by category in memory since Room doesn't support complex queries easily
+                }
+            } else if (query.isNotBlank()) {
+                productRepository.searchProducts(query)
+            } else {
+                productRepository.getProductsByCategory(category!!)
+            }
+            
+            products.collect { productList ->
+                _filteredProducts.value = if (category != null && query.isNotBlank()) {
+                    productList.filter { it.category == category }
+                } else {
+                    productList
+                }
+            }
+        }
+    }
 
-        // Alimentos
-        "quaker" to "Quaker",
-        "oats" to "Avena Quaker",
-        "cereal" to "Cereal",
-        "gamesa" to "Gamesa",
-        "emperador" to "Emperador",
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
 
-        // Términos generales
-        "bag" to "Producto Empaquetado",
-        "package" to "Producto PepsiCo",
-        "food" to "Alimento",
-        "drink" to "Bebida",
-        "snack food" to "Botana"
-    )
+    fun updateSelectedCategory(category: String?) {
+        _selectedCategory.value = category
+    }
+
+    fun navigateToScreen(screen: String) {
+        _currentScreen.value = screen
+    }
 
     // Launcher para permisos de cámara
     private val requestCameraPermissionLauncher = registerForActivityResult(
@@ -285,6 +359,40 @@ class MainActivity : ComponentActivity() {
         db = FirebaseFirestore.getInstance()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         cameraExecutor = Executors.newSingleThreadExecutor()
+
+        // Inicializar Room Database
+        database = AppDatabase.getDatabase(this)
+        productRepository = ProductRepository(database.productDao(), database.cartDao(), database.purchaseDao())
+
+        // Inicializar datos de productos
+        initializeProductData()
+
+        // Observar carrito de Room
+        lifecycleScope.launch {
+            productRepository.getCartItems().collect { cartItems ->
+                _cartItemsRoom.value = cartItems
+            }
+        }
+
+        // Observar historial de compras
+        lifecycleScope.launch {
+            productRepository.getAllPurchases().collect { purchases ->
+                _purchaseHistory.value = purchases
+            }
+        }
+
+        // Observar cambios en búsqueda y filtros
+        lifecycleScope.launch {
+            searchQuery.collect { query ->
+                updateFilteredProducts()
+            }
+        }
+
+        lifecycleScope.launch {
+            selectedCategory.collect { category ->
+                updateFilteredProducts()
+            }
+        }
 
         // Verificar permiso de cámara inicial
         checkCameraPermission()
@@ -423,20 +531,192 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun MainScreen() {
-        // Observar el estado del permiso
+        // Observar estados
         val hasPermission by hasCameraPermission.collectAsState()
+        val currentScreenState by currentScreen.collectAsState()
+        val cartItemsRoomList by cartItemsRoom.collectAsState()
+        val filteredProductsList by filteredProducts.collectAsState()
+        val searchQueryState by searchQuery.collectAsState()
+        val selectedCategoryState by selectedCategory.collectAsState()
+        val purchaseHistoryList by purchaseHistory.collectAsState()
 
-        // Observar productos detectados
+        // Estados locales
+        var showCart by remember { mutableStateOf(false) }
+
+        if (showCart) {
+            CartScreenRoom(
+                items = cartItemsRoomList,
+                onIncrement = { updateCartItemRoom(it, 1) },
+                onDecrement = { updateCartItemRoom(it, -1) },
+                onRemove = { removeFromCartRoom(it) },
+                onBack = { showCart = false },
+                onCheckout = { items ->
+                    lifecycleScope.launch {
+                        val purchaseId = productRepository.completePurchase(items)
+                        showCart = false
+                        Toast.makeText(this@MainActivity, "Compra completada: #${purchaseId.take(8)}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        } else {
+            MainNavigationScreen(
+                currentScreen = currentScreenState,
+                hasPermission = hasPermission,
+                filteredProducts = filteredProductsList,
+                searchQuery = searchQueryState,
+                selectedCategory = selectedCategoryState,
+                purchaseHistory = purchaseHistoryList,
+                cartItemCount = cartItemsRoomList.sumOf { it.quantity },
+                onNavigate = { navigateToScreen(it) },
+                onSearchQueryChange = { updateSearchQuery(it) },
+                onCategoryChange = { updateSelectedCategory(it) },
+                onRequestPermission = { requestCameraPermission() },
+                onShowCart = { showCart = true },
+                onAddToCart = { product ->
+                    lifecycleScope.launch {
+                        productRepository.addToCart(product.id)
+                        Toast.makeText(this@MainActivity, "${product.name} agregado al carrito", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun MainNavigationScreen(
+        currentScreen: String,
+        hasPermission: Boolean,
+        filteredProducts: List<Product>,
+        searchQuery: String,
+        selectedCategory: String?,
+        purchaseHistory: List<PurchaseHistory>,
+        cartItemCount: Int,
+        onNavigate: (String) -> Unit,
+        onSearchQueryChange: (String) -> Unit,
+        onCategoryChange: (String?) -> Unit,
+        onRequestPermission: () -> Unit,
+        onShowCart: () -> Unit,
+        onAddToCart: (Product) -> Unit
+    ) {
+        Scaffold(
+            bottomBar = {
+                NavigationBar(
+                    containerColor = PepsiColors.BackgroundDark
+                ) {
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.QrCodeScanner, contentDescription = "Scanner") },
+                        label = { Text("Scanner") },
+                        selected = currentScreen == "scanner",
+                        onClick = { onNavigate("scanner") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = PepsiColors.PepsiRed,
+                            selectedTextColor = PepsiColors.PepsiRed,
+                            unselectedIconColor = Color.White,
+                            unselectedTextColor = Color.White,
+                            indicatorColor = PepsiColors.PepsiRed.copy(alpha = 0.2f)
+                        )
+                    )
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.Search, contentDescription = "Productos") },
+                        label = { Text("Productos") },
+                        selected = currentScreen == "products",
+                        onClick = { onNavigate("products") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = PepsiColors.PepsiRed,
+                            selectedTextColor = PepsiColors.PepsiRed,
+                            unselectedIconColor = Color.White,
+                            unselectedTextColor = Color.White,
+                            indicatorColor = PepsiColors.PepsiRed.copy(alpha = 0.2f)
+                        )
+                    )
+                    NavigationBarItem(
+                        icon = { 
+                            Box {
+                                Icon(Icons.Default.ShoppingCart, contentDescription = "Carrito")
+                                if (cartItemCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .background(PepsiColors.PepsiRed, CircleShape)
+                                            .align(Alignment.TopEnd),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = cartItemCount.toString(),
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        label = { Text("Carrito") },
+                        selected = false,
+                        onClick = onShowCart,
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = PepsiColors.PepsiRed,
+                            selectedTextColor = PepsiColors.PepsiRed,
+                            unselectedIconColor = Color.White,
+                            unselectedTextColor = Color.White,
+                            indicatorColor = PepsiColors.PepsiRed.copy(alpha = 0.2f)
+                        )
+                    )
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.History, contentDescription = "Historial") },
+                        label = { Text("Historial") },
+                        selected = currentScreen == "history",
+                        onClick = { onNavigate("history") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = PepsiColors.PepsiRed,
+                            selectedTextColor = PepsiColors.PepsiRed,
+                            unselectedIconColor = Color.White,
+                            unselectedTextColor = Color.White,
+                            indicatorColor = PepsiColors.PepsiRed.copy(alpha = 0.2f)
+                        )
+                    )
+                }
+            },
+            containerColor = PepsiColors.BackgroundDark
+        ) { paddingValues ->
+            when (currentScreen) {
+                "scanner" -> ScannerScreen(
+                    hasPermission = hasPermission,
+                    onRequestPermission = onRequestPermission,
+                    modifier = Modifier.padding(paddingValues)
+                )
+                "products" -> ProductsScreen(
+                    products = filteredProducts,
+                    searchQuery = searchQuery,
+                    selectedCategory = selectedCategory,
+                    onSearchQueryChange = onSearchQueryChange,
+                    onCategoryChange = onCategoryChange,
+                    onAddToCart = onAddToCart,
+                    modifier = Modifier.padding(paddingValues)
+                )
+                "history" -> PurchaseHistoryScreen(
+                    purchases = purchaseHistory,
+                    modifier = Modifier.padding(paddingValues)
+                )
+            }
+        }
+    }
+
+    @Composable
+    fun ScannerScreen(
+        hasPermission: Boolean,
+        onRequestPermission: () -> Unit,
+        modifier: Modifier = Modifier
+    ) {
+        // Observar productos detectados para el scanner
         val products by detectedProducts.collectAsState()
         val currentHighlight by currentProduct.collectAsState()
         val totalDetections by detectionCount.collectAsState()
-        val cartItemsList by cartItems.collectAsState()
 
         // Para animaciones
         val scope = rememberCoroutineScope()
         val listState = rememberLazyListState()
-
-        var showCart by remember { mutableStateOf(false) }
 
         // Hacer scroll automático cuando se detecta un nuevo producto
         LaunchedEffect(products.size) {
@@ -447,110 +727,635 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        if (showCart) {
-            CartScreen(
-                items = cartItemsList,
-                onIncrement = { updateCartItem(it.name, 1) },
-                onDecrement = { updateCartItem(it.name, -1) },
-                onRemove = { removeFromCart(it.name) },
-                onBack = { showCart = false }
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-            ) {
-                when {
-                    hasPermission -> {
-                        // Cámara de fondo
-                        CameraScreen()
+        when {
+            hasPermission -> {
+                Box(
+                    modifier = modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                ) {
+                    // Cámara de fondo
+                    CameraScreen()
 
-                        // Overlay con gradiente
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.Black.copy(alpha = 0.7f),
-                                            Color.Transparent,
-                                            Color.Transparent,
-                                            Color.Black.copy(alpha = 0.8f)
-                                        )
+                    // Overlay con gradiente
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Black.copy(alpha = 0.7f),
+                                        Color.Transparent,
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.8f)
                                     )
                                 )
-                        )
+                            )
+                    )
 
-                        // UI Principal
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp)
-                        ) {
-                            // Header animado
-                            HeaderSection(totalDetections)
+                    // UI Principal
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                    ) {
+                        // Header animado
+                        HeaderSection(totalDetections)
 
-                            // Estadísticas si hay productos
-                            if (products.size >= 3) {
-                                DetectionStats(products)
-                            }
-
-                            Spacer(modifier = Modifier.weight(1f))
-
-                            // Producto destacado actual
-                            currentHighlight?.let { product ->
-                                CurrentProductCard(product)
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // Lista de productos detectados
-                            AnimatedVisibility(
-                                visible = products.isNotEmpty(),
-                                enter = slideInVertically() + fadeIn(),
-                                exit = slideOutVertically() + fadeOut()
-                            ) {
-                                ProductHistoryCard(products, listState)
-                            }
+                        // Estadísticas si hay productos
+                        if (products.size >= 3) {
+                            DetectionStats(products)
                         }
 
-                        // Botones flotantes
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.CenterEnd
+                        Spacer(modifier = Modifier.weight(1f))
+
+                        // Producto destacado actual
+                        currentHighlight?.let { product ->
+                            CurrentProductCard(product)
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Lista de productos detectados
+                        AnimatedVisibility(
+                            visible = products.isNotEmpty(),
+                            enter = slideInVertically() + fadeIn(),
+                            exit = slideOutVertically() + fadeOut()
                         ) {
-                            FloatingActionButtons(
-                                onSaveDetections = {
-                                    saveDetectionsToFirestore(
-                                        products = products,
-                                        location = null, // Aquí podrías pasar la ubicación real
-                                        onSuccess = {
-                                            Toast.makeText(this@MainActivity, "¡Guardado en Firestore!", Toast.LENGTH_SHORT).show()
-                                        },
-                                        onError = { e ->
-                                            Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
-                                },
-                                onClearDetections = {
-                                    _detectedProducts.value = emptyList()
-                                    _detectionCount.value = 0
-                                    _currentProduct.value = null
-                                    _cartItems.value = emptyList()
-                                },
-                                onShareDetections = {
-                                    shareDetections(this@MainActivity, products)
-                                },
-                                onShowCart = { showCart = true }
-                            )
+                            ProductHistoryCard(products, listState)
                         }
                     }
-                    else -> {
-                        // Pantalla de permiso
-                        PermissionScreen(onRequestPermission = {
-                            requestCameraPermission()
-                        })
+
+                    // Botones flotantes
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
+                        FloatingActionButtons(
+                            onSaveDetections = {
+                                saveDetectionsToFirestore(
+                                    products = products,
+                                    location = null,
+                                    onSuccess = {
+                                        Toast.makeText(this@MainActivity, "¡Guardado en Firestore!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    onError = { e ->
+                                        Toast.makeText(this@MainActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            },
+                            onClearDetections = {
+                                _detectedProducts.value = emptyList()
+                                _detectionCount.value = 0
+                                _currentProduct.value = null
+                                _cartItems.value = emptyList()
+                                lifecycleScope.launch {
+                                    productRepository.clearCart()
+                                }
+                            },
+                            onShareDetections = {
+                                shareDetections(this@MainActivity, products)
+                            }
+                        )
+                    }
+                }
+            }
+            else -> {
+                PermissionScreen(onRequestPermission = onRequestPermission)
+            }
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun ProductsScreen(
+        products: List<Product>,
+        searchQuery: String,
+        selectedCategory: String?,
+        onSearchQueryChange: (String) -> Unit,
+        onCategoryChange: (String?) -> Unit,
+        onAddToCart: (Product) -> Unit,
+        modifier: Modifier = Modifier
+    ) {
+        val categories = listOf(
+            ProductCategory.BEBIDAS.displayName,
+            ProductCategory.SNACKS.displayName,
+            ProductCategory.ALIMENTOS.displayName,
+            ProductCategory.CEREALES.displayName,
+            ProductCategory.JUGOS.displayName,
+            ProductCategory.AGUA.displayName
+        )
+
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(PepsiColors.BackgroundDark)
+                .padding(16.dp)
+        ) {
+            // Barra de búsqueda
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                label = { Text("Buscar productos...", color = Color.White.copy(alpha = 0.7f)) },
+                leadingIcon = {
+                    Icon(Icons.Default.Search, contentDescription = "Buscar", tint = PepsiColors.PepsiBlue)
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchQueryChange("") }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Limpiar", tint = Color.White)
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = PepsiColors.PepsiBlue,
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.5f)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Filtros de categorías
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    FilterChip(
+                        onClick = { onCategoryChange(null) },
+                        label = { Text("Todos") },
+                        selected = selectedCategory == null,
+                        enabled = true,
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PepsiColors.PepsiRed,
+                            selectedLabelColor = Color.White,
+                            containerColor = Color.Transparent,
+                            labelColor = Color.White
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = selectedCategory == null,
+                            borderColor = Color.White.copy(alpha = 0.5f),
+                            selectedBorderColor = PepsiColors.PepsiRed
+                        )
+                    )
+                }
+                items(categories) { category ->
+                    FilterChip(
+                        onClick = { 
+                            onCategoryChange(if (selectedCategory == category) null else category)
+                        },
+                        label = { Text(category) },
+                        selected = selectedCategory == category,
+                        enabled = true,
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PepsiColors.PepsiRed,
+                            selectedLabelColor = Color.White,
+                            containerColor = Color.Transparent,
+                            labelColor = Color.White
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = selectedCategory == category,
+                            borderColor = Color.White.copy(alpha = 0.5f),
+                            selectedBorderColor = PepsiColors.PepsiRed
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Lista de productos
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(products, key = { it.id }) { product ->
+                    ProductCard(
+                        product = product,
+                        onAddToCart = { onAddToCart(product) }
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun ProductCard(
+        product: Product,
+        onAddToCart: () -> Unit
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = PepsiColors.CardDark.copy(alpha = 0.9f)
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = product.name,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = product.brand,
+                        color = PepsiColors.AccentOrange,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        text = "${product.category} • ${product.weight ?: "N/A"}",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        text = product.description,
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 11.sp,
+                        maxLines = 2
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "${"$%.2f".format(product.price)} ${product.currency}",
+                        color = PepsiColors.SuccessGreen,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Button(
+                    onClick = onAddToCart,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PepsiColors.PepsiRed
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "Agregar",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Agregar")
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun PurchaseHistoryScreen(
+        purchases: List<PurchaseHistory>,
+        modifier: Modifier = Modifier
+    ) {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(PepsiColors.BackgroundDark)
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "Historial de Compras",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            if (purchases.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.History,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = Color.White.copy(alpha = 0.5f)
+                        )
+                        Text(
+                            "No hay compras registradas",
+                            color = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(purchases, key = { it.id }) { purchase ->
+                        PurchaseHistoryCard(purchase)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun PurchaseHistoryCard(purchase: PurchaseHistory) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = PepsiColors.CardDark.copy(alpha = 0.9f)
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column {
+                        Text(
+                            text = "Compra #${purchase.id.take(8)}",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+                                .format(Date(purchase.purchaseDate)),
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 12.sp
+                        )
+                    }
+                    
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                when (purchase.status) {
+                                    "completed" -> PepsiColors.SuccessGreen
+                                    "pending" -> PepsiColors.AccentOrange
+                                    else -> PepsiColors.PepsiRed
+                                },
+                                RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = purchase.status.uppercase(),
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${purchase.itemCount} items",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 14.sp
+                    )
+                    Text(
+                        text = "${"$%.2f".format(purchase.totalAmount)} MXN",
+                        color = PepsiColors.SuccessGreen,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+
+    // Actualizar CartScreenRoom para agregar onCheckout
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun CartScreenRoom(
+        items: List<CartItemWithProduct>,
+        onIncrement: (CartItemWithProduct) -> Unit,
+        onDecrement: (CartItemWithProduct) -> Unit,
+        onRemove: (CartItemWithProduct) -> Unit,
+        onBack: () -> Unit,
+        onCheckout: (List<CartItemWithProduct>) -> Unit
+    ) {
+        val totalPrice = items.sumOf { it.product.price * it.quantity }
+        
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Carrito de Compras", color = Color.White) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Volver", tint = Color.White)
+                        }
+                    },
+                    actions = {
+                        Text(
+                            text = "${items.sumOf { it.quantity }} items",
+                            color = Color.White,
+                            modifier = Modifier.padding(end = 16.dp)
+                        )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = PepsiColors.PepsiBlue)
+                )
+            },
+            containerColor = PepsiColors.BackgroundDark,
+            bottomBar = {
+                if (items.isNotEmpty()) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = PepsiColors.PepsiBlue),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Total:",
+                                    color = Color.White,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "$${"%.2f".format(totalPrice)} MXN",
+                                    color = Color.White,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { onCheckout(items) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = PepsiColors.SuccessGreen)
+                            ) {
+                                Text("Proceder al Pago", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        ) { padding ->
+            if (items.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Default.ShoppingCart,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = Color.White.copy(alpha = 0.5f)
+                        )
+                        Text(
+                            "No hay productos en el carrito",
+                            color = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(items, key = { it.product.id }) { item ->
+                        CartItemRowRoom(item, onIncrement, onDecrement, onRemove)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun CartItemRowRoom(
+        item: CartItemWithProduct,
+        onIncrement: (CartItemWithProduct) -> Unit,
+        onDecrement: (CartItemWithProduct) -> Unit,
+        onRemove: (CartItemWithProduct) -> Unit
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = PepsiColors.CardDark.copy(alpha = 0.8f)
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = item.product.name,
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = item.product.brand,
+                            color = PepsiColors.AccentOrange,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = item.product.category + " • " + (item.product.weight ?: ""),
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "${"$%.2f".format(item.product.price)} MXN",
+                            color = PepsiColors.SuccessGreen,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+
+                    IconButton(onClick = { onRemove(item) }) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Eliminar",
+                            tint = PepsiColors.PepsiRed
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Subtotal: ${"$%.2f".format(item.product.price * item.quantity)} MXN",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .background(
+                                PepsiColors.PepsiBlue.copy(alpha = 0.3f),
+                                RoundedCornerShape(20.dp)
+                            )
+                            .padding(4.dp)
+                    ) {
+                        IconButton(
+                            onClick = { onDecrement(item) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Remove,
+                                contentDescription = "Disminuir",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Text(
+                            text = item.quantity.toString(),
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        IconButton(
+                            onClick = { onIncrement(item) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "Aumentar",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -600,7 +1405,6 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                // Contador animado
                 Box(
                     modifier = Modifier
                         .size(60.dp)
@@ -615,122 +1419,6 @@ class MainActivity : ComponentActivity() {
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
-                }
-            }
-        }
-    }
-
-    @Composable
-    fun FloatingActionButtons(
-        onSaveDetections: () -> Unit,
-        onClearDetections: () -> Unit,
-        onShareDetections: () -> Unit,
-        onShowCart: () -> Unit
-    ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(16.dp)
-        ) {
-            // Botón de carrito
-            FloatingActionButton(
-                onClick = onShowCart,
-                containerColor = PepsiColors.PepsiBlue,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    Icons.Default.ShoppingCart,
-                    contentDescription = "Carrito",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // Botón de compartir
-            FloatingActionButton(
-                onClick = onShareDetections,
-                containerColor = PepsiColors.LightBlue,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    Icons.Default.Share,
-                    contentDescription = "Compartir",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // Botón de guardar
-            FloatingActionButton(
-                onClick = onSaveDetections,
-                containerColor = PepsiColors.SuccessGreen,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = "Guardar",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // Botón de limpiar
-            FloatingActionButton(
-                onClick = onClearDetections,
-                containerColor = PepsiColors.PepsiRed,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    Icons.Default.Clear,
-                    contentDescription = "Limpiar",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-    }
-
-    @Composable
-    fun CartScreen(
-        items: List<CartItem>,
-        onIncrement: (CartItem) -> Unit,
-        onDecrement: (CartItem) -> Unit,
-        onRemove: (CartItem) -> Unit,
-        onBack: () -> Unit
-    ) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Carrito de Compras", color = Color.White) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Volver", tint = Color.White)
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = PepsiColors.PepsiBlue)
-                )
-            },
-            containerColor = PepsiColors.BackgroundDark
-        ) { padding ->
-            if (items.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("No hay productos en el carrito", color = Color.White)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(items, key = { it.name }) { item ->
-                        CartItemRow(item, onIncrement, onDecrement, onRemove)
-                    }
                 }
             }
         }
@@ -851,7 +1539,6 @@ class MainActivity : ComponentActivity() {
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Ícono animado
                 val rotation by rememberInfiniteTransition().animateFloat(
                     initialValue = 0f,
                     targetValue = 360f,
@@ -871,7 +1558,6 @@ class MainActivity : ComponentActivity() {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Nombre del producto
                 Text(
                     text = product.name,
                     fontSize = 28.sp,
@@ -882,7 +1568,6 @@ class MainActivity : ComponentActivity() {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Barra de confianza animada
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -915,7 +1600,6 @@ class MainActivity : ComponentActivity() {
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Timestamp
                 Text(
                     text = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
                         .format(Date(product.timestamp)),
@@ -1042,51 +1726,52 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    fun CartItemRow(
-        item: CartItem,
-        onIncrement: (CartItem) -> Unit,
-        onDecrement: (CartItem) -> Unit,
-        onRemove: (CartItem) -> Unit
+    fun FloatingActionButtons(
+        onSaveDetections: () -> Unit,
+        onClearDetections: () -> Unit,
+        onShareDetections: () -> Unit
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(
-                    Brush.horizontalGradient(
-                        colors = listOf(
-                            PepsiColors.PepsiBlue.copy(alpha = 0.3f),
-                            PepsiColors.PepsiBlue.copy(alpha = 0.1f)
-                        )
-                    )
-                )
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(16.dp)
         ) {
-            Text(
-                text = item.name,
-                color = Color.White,
-                fontSize = 14.sp,
-                modifier = Modifier.weight(1f)
-            )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { onDecrement(item) }) {
-                    Icon(Icons.Default.Remove, contentDescription = "Disminuir", tint = Color.White)
-                }
-                Text(
-                    text = item.quantity.toString(),
-                    color = Color.White,
-                    fontSize = 14.sp
+            FloatingActionButton(
+                onClick = onShareDetections,
+                containerColor = PepsiColors.LightBlue,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = "Compartir",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
                 )
-                IconButton(onClick = { onIncrement(item) }) {
-                    Icon(Icons.Default.Add, contentDescription = "Aumentar", tint = Color.White)
-                }
             }
 
-            IconButton(onClick = { onRemove(item) }) {
-                Icon(Icons.Default.Delete, contentDescription = "Eliminar", tint = PepsiColors.PepsiRed)
+            FloatingActionButton(
+                onClick = onSaveDetections,
+                containerColor = PepsiColors.SuccessGreen,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "Guardar",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            FloatingActionButton(
+                onClick = onClearDetections,
+                containerColor = PepsiColors.PepsiRed,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(
+                    Icons.Default.Clear,
+                    contentDescription = "Limpiar",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -1186,12 +1871,10 @@ class MainActivity : ComponentActivity() {
             cameraProviderFuture.addListener({
                 val cameraProvider = cameraProviderFuture.get()
 
-                // Preview
                 val preview = Preview.Builder().build().also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
 
-                // Image Analysis
                 val imageAnalyzer = ImageAnalysis.Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
@@ -1212,9 +1895,7 @@ class MainActivity : ComponentActivity() {
                 }
             }, ContextCompat.getMainExecutor(context))
 
-            onDispose {
-                // Limpieza si es necesaria
-            }
+            onDispose { }
         }
 
         AndroidView(
@@ -1246,25 +1927,24 @@ class MainActivity : ComponentActivity() {
                                 for (label in detectedObject.labels) {
                                     val labelText = label.text.lowercase()
 
-                                    // Verificar si es un producto PepsiCo
-                                    val matchedProduct = pepsicoProducts.entries.find { (key, _) ->
-                                        labelText.contains(key) || key.contains(labelText)
-                                    }
+                                    // Buscar producto en la base de datos Room
+                                    lifecycleScope.launch {
+                                        val foundProduct = productRepository.findProductByDetectionKeyword(labelText)
+                                        foundProduct?.let { product ->
+                                            val detectedProduct = DetectedProduct(
+                                                name = product.name,
+                                                confidence = label.confidence
+                                            )
+                                            pepsicoDetections.add(detectedProduct)
+                                            addToCart(product.name)
 
-                                    matchedProduct?.let { (_, productName) ->
-                                        val product = DetectedProduct(
-                                            name = productName,
-                                            confidence = label.confidence
-                                        )
-                                        pepsicoDetections.add(product)
-                                        addToCart(productName)
+                                            // Actualizar producto actual si tiene alta confianza
+                                            if (label.confidence > 0.7f) {
+                                                _currentProduct.value = detectedProduct
+                                            }
 
-                                        // Actualizar producto actual si tiene alta confianza
-                                        if (label.confidence > 0.7f) {
-                                            _currentProduct.value = product
+                                            Log.d("PepsiCo", "Detectado: ${product.name} (${label.confidence}) - $${product.price}")
                                         }
-
-                                        Log.d("PepsiCo", "Detectado: $productName (${label.confidence})")
                                     }
                                 }
                             }
