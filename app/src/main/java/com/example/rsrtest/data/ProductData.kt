@@ -28,7 +28,7 @@ object ProductData {
             barcode = "7501234567891",
             weight = "355ml",
             keywords = "pepsi, cola, lata, refresco, bebida, 355ml",
-            detectionKeywords = "pepsi,cola,can,soda,beverage,drink"
+            detectionKeywords = "pepsi,pepsi black,cola,can,soda,beverage,drink"
         ),
         Product(
             id = "pepsi-cola-3l",
@@ -383,7 +383,162 @@ object ProductData {
             barcode = "7501234567916",
             weight = "600ml",
             keywords = "manzanita sol, manzana, refresco, mexicano, 600ml",
-            detectionKeywords = "manzanita,apple,soda,beverage,bottle,mexican"
+            detectionKeywords = "manzanita sol,manzanita,apple,soda,beverage,bottle,mexican"
+        ),
+
+        // ===== PEPSI BLACK =====
+        Product(
+            id = "pepsi-black-355ml",
+            name = "Pepsi Black 355ml",
+            brand = ProductBrand.PEPSI.displayName,
+            category = ProductCategory.BEBIDAS.displayName,
+            subcategory = "Refrescos de Cola",
+            description = "Pepsi Black sin azúcar con sabor intenso",
+            price = 16.00,
+            barcode = "7501234567917",
+            weight = "355ml",
+            keywords = "pepsi black, cola, sin azucar, refresco, bebida, 355ml",
+            detectionKeywords = "pepsi black,pepsi,cola,black,soda,beverage,drink,can"
+        ),
+        Product(
+            id = "pepsi-black-600ml",
+            name = "Pepsi Black 600ml",
+            brand = ProductBrand.PEPSI.displayName,
+            category = ProductCategory.BEBIDAS.displayName,
+            subcategory = "Refrescos de Cola",
+            description = "Pepsi Black sin azúcar en botella de 600ml",
+            price = 19.00,
+            barcode = "7501234567918",
+            weight = "600ml",
+            keywords = "pepsi black, cola, sin azucar, refresco, bebida, 600ml, botella",
+            detectionKeywords = "pepsi black,pepsi,cola,black,soda,beverage,drink,bottle"
+        ),
+        Product(
+            id = "pepsi-black-2l",
+            name = "Pepsi Black 2L",
+            brand = ProductBrand.PEPSI.displayName,
+            category = ProductCategory.BEBIDAS.displayName,
+            subcategory = "Refrescos de Cola",
+            description = "Pepsi Black sin azúcar familiar de 2 litros",
+            price = 38.00,
+            barcode = "7501234567919",
+            weight = "2L",
+            keywords = "pepsi black, cola, sin azucar, refresco, familiar, 2L, botella",
+            detectionKeywords = "pepsi black,pepsi,cola,black,soda,beverage,drink,bottle,big"
+        ),
+
+        // ===== SQUIRT =====
+        Product(
+            id = "squirt-600ml",
+            name = "Squirt 600ml", 
+            brand = "Squirt",
+            category = ProductCategory.BEBIDAS.displayName,
+            subcategory = "Refrescos Cítricos",
+            description = "Refresco sabor toronja con un toque cítrico refrescante",
+            price = 17.50,
+            barcode = "7501234567918",
+            weight = "600ml",
+            keywords = "squirt, toronja, citrico, refresco, refrescante, 600ml",
+            detectionKeywords = "squirt,grapefruit,citrus,soda,beverage,drink,bottle"
+        )
+    )
+
+    fun getAllStores(): List<Store> = listOf(
+        Store(
+            customerNumber = "2003863307",
+            chainLevel1 = "Independent/Small Chain",
+            chainLevel2 = "Independent/Small Chain",
+            customerName = "\"New\" Canton Var."
+        ),
+        Store(
+            customerNumber = "2004897758",
+            chainLevel1 = "Hra",
+            chainLevel2 = "Hra",
+            customerName = "\"New\" Mega Star 2"
+        ),
+        Store(
+            customerNumber = "2004897622",
+            chainLevel1 = "Customers Wo Assignment",
+            chainLevel2 = "",
+            customerName = "\"New\" Mega Star 3"
+        ),
+        Store(
+            customerNumber = "2004897514",
+            chainLevel1 = "Hra",
+            chainLevel2 = "Hra",
+            customerName = "\"New\" Mega Star 7"
+        ),
+        Store(
+            customerNumber = "2004824931",
+            chainLevel1 = "Alliance Group",
+            chainLevel2 = "Active 1",
+            customerName = "\"The Market Of Perham\""
+        ),
+        Store(
+            customerNumber = "2003757032",
+            chainLevel1 = "Petsmart",
+            chainLevel2 = "Petsmart",
+            customerName = "# 154 Petsmart East Mesa"
+        ),
+        Store(
+            customerNumber = "2003751091",
+            chainLevel1 = "Independent/Small Chain",
+            chainLevel2 = "Independent/Small Chain",
+            customerName = "# Food Store"
+        ),
+        Store(
+            customerNumber = "2003620888",
+            chainLevel1 = "Ner Ib Chain",
+            chainLevel2 = "Cda",
+            customerName = "#1 Ac Deli & Food Mart"
+        ),
+        Store(
+            customerNumber = "2003584375",
+            chainLevel1 = "Ubc",
+            chainLevel2 = "Ubc",
+            customerName = "#1 Airline Food (Ibc)"
+        ),
+        Store(
+            customerNumber = "2003783703",
+            chainLevel1 = "Se Asian American Assoc",
+            chainLevel2 = "Se Asian A",
+            customerName = "#1 Convenient Mart"
+        ),
+        Store(
+            customerNumber = "2003611051",
+            chainLevel1 = "Sunbelt Merchant Group",
+            chainLevel2 = "Sunbelt Me",
+            customerName = "#1 C-Store"
+        ),
+        Store(
+            customerNumber = "2003714803",
+            chainLevel1 = "Se Asian American Assoc",
+            chainLevel2 = "Se Asian A",
+            customerName = "#1 Discount Beverage"
+        ),
+        Store(
+            customerNumber = "2003608436",
+            chainLevel1 = "Nw Cs Independen T",
+            chainLevel2 = "Nw Cs Inde",
+            customerName = "#1 Food 4 Mart"
+        ),
+        Store(
+            customerNumber = "2003504007",
+            chainLevel1 = "Independent/Small Chain",
+            chainLevel2 = "Independent/Small Chain",
+            customerName = "#1 Food Store"
+        ),
+        Store(
+            customerNumber = "2003818848",
+            chainLevel1 = "Ibc Buyers Co-Op",
+            chainLevel2 = "Active",
+            customerName = "#1 Food Store"
+        ),
+        Store(
+            customerNumber = "2003823135",
+            chainLevel1 = "Independent/Small Chain",
+            chainLevel2 = "Independent/Small Chain",
+            customerName = "#1 Food Store"
         )
     )
 }

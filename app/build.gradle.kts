@@ -111,10 +111,12 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics-ktx")
 
     // -------------------------------------
-    // 7) PyTorch Mobile
+    // 7) TensorFlow Lite para YOLO (sin PyTorch para evitar conflictos)
     // -------------------------------------
-    implementation("org.pytorch:pytorch_android:1.13.0")
-    implementation("org.pytorch:pytorch_android_torchvision:1.13.0")
+    implementation("org.tensorflow:tensorflow-lite:2.14.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite-metadata:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
 
     // -------------------------------------
     // 8) Room Database

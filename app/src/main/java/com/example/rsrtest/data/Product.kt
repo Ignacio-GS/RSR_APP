@@ -32,6 +32,15 @@ data class CartItemEntity(
     val addedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "stores")
+data class Store(
+    @PrimaryKey
+    val customerNumber: String,
+    val chainLevel1: String,
+    val chainLevel2: String,
+    val customerName: String
+)
+
 @Entity(tableName = "purchase_history")
 data class PurchaseHistory(
     @PrimaryKey
@@ -39,7 +48,8 @@ data class PurchaseHistory(
     val purchaseDate: Long = System.currentTimeMillis(),
     val totalAmount: Double,
     val itemCount: Int,
-    val status: String = "completed" // completed, pending, cancelled
+    val status: String = "completed", // completed, pending, cancelled
+    val storeId: String? = null // Link to store
 )
 
 @Entity(tableName = "purchase_items")

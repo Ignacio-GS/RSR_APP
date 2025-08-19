@@ -5,7 +5,8 @@ import kotlinx.coroutines.flow.Flow
 class ProductRepository(
     private val productDao: ProductDao,
     private val cartDao: CartDao,
-    private val purchaseDao: PurchaseDao
+    private val purchaseDao: PurchaseDao,
+    private val storeDao: StoreDao
 ) {
     fun getAllProducts(): Flow<List<Product>> = productDao.getAllProducts()
     
@@ -75,7 +76,10 @@ class ProductRepository(
     
     suspend fun getTotalSpent(): Double = purchaseDao.getTotalSpent() ?: 0.0
     
-    suspend fun completePurchase(cartItems: List<CartItemWithProduct>): String {
+    fun getPurchasesByStore(storeId: String): Flow<List<PurchaseHistory>> = 
+        purchaseDao.getPurchasesByStore(storeId)
+    
+    suspend fun completePurchase(cartItems: List<CartItemWithProduct>, storeId: String? = null): String {
         val purchaseId = java.util.UUID.randomUUID().toString()
         val totalAmount = cartItems.sumOf { it.product.price * it.quantity }
         val itemCount = cartItems.sumOf { it.quantity }
@@ -84,7 +88,8 @@ class ProductRepository(
         val purchase = PurchaseHistory(
             id = purchaseId,
             totalAmount = totalAmount,
-            itemCount = itemCount
+            itemCount = itemCount,
+            storeId = storeId
         )
         
         // Crear items de compra
@@ -117,4 +122,19 @@ class ProductRepository(
             purchaseDao.deletePurchaseItems(purchaseId)
         }
     }
+
+    // Store operations
+    fun getAllStores(): Flow<List<Store>> = storeDao.getAllStores()
+    
+    suspend fun getStoreById(customerNumber: String): Store? = 
+        storeDao.getStoreById(customerNumber)
+    
+    fun getStoresByChain(chain: String): Flow<List<Store>> = 
+        storeDao.getStoresByChain(chain)
+    
+    fun searchStores(query: String): Flow<List<Store>> = 
+        storeDao.searchStores(query)
+    
+    suspend fun insertStores(stores: List<Store>) = 
+        storeDao.insertStores(stores)
 }

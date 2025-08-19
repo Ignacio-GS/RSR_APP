@@ -30,7 +30,7 @@ interface ProductDao {
 
     @Query("""
         SELECT * FROM products 
-        WHERE detectionKeywords LIKE '%' || :keyword || '%'
+        WHERE LOWER(detectionKeywords) LIKE '%' || LOWER(:keyword) || '%'
         AND isActive = 1
         ORDER BY name ASC
         LIMIT 1
@@ -127,4 +127,40 @@ interface PurchaseDao {
 
     @Query("DELETE FROM purchase_items WHERE purchaseId = :purchaseId")
     suspend fun deletePurchaseItems(purchaseId: String)
+
+    @Query("SELECT * FROM purchase_history WHERE storeId = :storeId ORDER BY purchaseDate DESC")
+    fun getPurchasesByStore(storeId: String): Flow<List<PurchaseHistory>>
+}
+
+@Dao
+interface StoreDao {
+    @Query("SELECT * FROM stores ORDER BY customerName ASC")
+    fun getAllStores(): Flow<List<Store>>
+
+    @Query("SELECT * FROM stores WHERE customerNumber = :customerNumber")
+    suspend fun getStoreById(customerNumber: String): Store?
+
+    @Query("SELECT * FROM stores WHERE chainLevel1 = :chain ORDER BY customerName ASC")
+    fun getStoresByChain(chain: String): Flow<List<Store>>
+
+    @Query("""
+        SELECT * FROM stores 
+        WHERE customerName LIKE '%' || :query || '%' 
+        OR chainLevel1 LIKE '%' || :query || '%'
+        OR chainLevel2 LIKE '%' || :query || '%'
+        ORDER BY customerName ASC
+    """)
+    fun searchStores(query: String): Flow<List<Store>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertStore(store: Store)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertStores(stores: List<Store>)
+
+    @Update
+    suspend fun updateStore(store: Store)
+
+    @Delete
+    suspend fun deleteStore(store: Store)
 }
