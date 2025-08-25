@@ -31,7 +31,7 @@ class YoloDetectorTfLite(private val context: Context) {
         private const val MODEL_FILENAME = "best_float32.tflite"  // Tu modelo YOLO convertido
         private const val LABELS_FILENAME = "classes.txt"
         private const val INPUT_SIZE = 640
-        private const val CONFIDENCE_THRESHOLD = 0.3f  // Umbral base
+        private const val CONFIDENCE_THRESHOLD = 0.25f  // Umbral más bajo para más detecciones
         private const val IOU_THRESHOLD = 0.45f
         private const val MAX_DETECTION = 8400  // Según la salida [1, 11, 8400]
         private const val OUTPUT_CLASSES = 7    // 11 - 4 = 7 clases
@@ -41,23 +41,23 @@ class YoloDetectorTfLite(private val context: Context) {
     private var labels: List<String> = emptyList()
     private var isInitialized = false
     
-    // Thresholds específicos por clase para mejorar detección
+    // Thresholds simplificados por clase
     private val classSpecificThresholds = mapOf(
-        "7up" to 0.12f,           // EXTREMADAMENTE sensible para 7up
-        "Mirinda" to 0.17f,       // MUY sensible para Mirinda (funciona bien)
-        "Squirt" to 0.12f,        // EXTREMADAMENTE sensible para Squirt
-        "Pepsi Black" to 0.35f,   // MENOS sensible para Pepsi Black
-        "Pepsi" to 0.25f,         // Ligeramente más sensible para Pepsi normal
-        "Cheetos" to 0.30f,       // Threshold normal para Cheetos
-        "Manzanita Sol" to 0.25f  // Ligeramente más sensible para Manzanita Sol
+        "7up" to 0.20f,
+        "Mirinda" to 0.20f,
+        "Squirt" to 0.20f,
+        "Pepsi Black" to 0.25f,
+        "Pepsi" to 0.20f,
+        "Cheetos" to 0.25f,
+        "Manzanita Sol" to 0.20f
     )
     
-    // Boost de confianza para productos específicos
+    // Boost de confianza simplificado
     private val confidenceBoostFactors = mapOf(
-        "7up" to 1.30f,        // 30% boost para 7up
-        "Mirinda" to 1.20f,    // 20% boost para Mirinda (funciona bien)
-        "Squirt" to 1.30f,     // 30% boost para Squirt
-        "Pepsi Black" to 0.95f // 5% penalización para Pepsi Black
+        "7up" to 1.10f,
+        "Mirinda" to 1.10f,
+        "Squirt" to 1.10f,
+        "Pepsi Black" to 0.95f
     )
     
     // Método para obtener threshold específico de una clase
@@ -199,10 +199,10 @@ class YoloDetectorTfLite(private val context: Context) {
     }
 
     fun detectObjects(imageProxy: ImageProxy): List<TfLiteDetection> {
-        Log.d(TAG, "detectObjects called - isInitialized: $isInitialized, interpreter: ${interpreter != null}")
+        Log.d(TAG, "🔍 detectObjects called - isInitialized: $isInitialized, interpreter: ${interpreter != null}")
         
         if (!isInitialized || interpreter == null) {
-            Log.w(TAG, "Detector no inicializado - isInitialized: $isInitialized, interpreter: ${interpreter != null}")
+            Log.w(TAG, "❌ Detector no inicializado - isInitialized: $isInitialized, interpreter: ${interpreter != null}")
             return emptyList()
         }
         
@@ -437,7 +437,7 @@ class YoloDetectorTfLite(private val context: Context) {
                 
                 if (classId < labels.size) {
                     val className = labels.getOrElse(classId) { "unknown_$classId" }
-                    val specificThreshold = getDynamicThreshold(className) // Usar threshold dinámico
+                    val specificThreshold = getThresholdForClass(className) // Usar threshold simple
                     
                     if (finalConfidence > specificThreshold) {
                         // Convertir coordenadas normalizadas a píxeles
@@ -484,23 +484,20 @@ class YoloDetectorTfLite(private val context: Context) {
         Log.d(TAG, "Total detecciones antes de NMS: ${detections.size}")
         val nmsDetections = applyNMS(detections)
         
-        // Sistema de estabilidad muy permisivo - solo registra pero permite casi todo
-        val stableDetections = mutableListOf<TfLiteDetection>()
+        // Filtro simplificado - permitir más detecciones
+        val finalDetections = mutableListOf<TfLiteDetection>()
         for (detection in nmsDetections) {
-            // Registrar en historial pero ser muy permisivo
-            isStableDetection(detection.className)
-            
-            // Permitir prácticamente todas las detecciones (solo filtrar muy bajas)
-            if (detection.confidence > 0.10f) { // Threshold súper bajo
-                stableDetections.add(detection)
-                Log.d(TAG, "✅ Detección incluida: ${detection.className} (${detection.confidence})")
+            // Solo aplicar threshold básico
+            if (detection.confidence > 0.15f) {
+                finalDetections.add(detection)
+                Log.d(TAG, "✅ Detección aceptada: ${detection.className} (${detection.confidence})")
             } else {
-                Log.d(TAG, "❌ Detección muy baja filtrada: ${detection.className} (${detection.confidence})")
+                Log.d(TAG, "❌ Detección filtrada: ${detection.className} (${detection.confidence})")
             }
         }
         
-        Log.d(TAG, "Detecciones incluidas: ${stableDetections.size}/${nmsDetections.size}")
-        return stableDetections
+        Log.d(TAG, "Detecciones finales: ${finalDetections.size}/${nmsDetections.size}")
+        return finalDetections
     }
     
     private fun applyNMS(detections: List<TfLiteDetection>): List<TfLiteDetection> {
@@ -550,10 +547,10 @@ class YoloDetectorTfLite(private val context: Context) {
     private val detectionStats = mutableMapOf<String, Int>()
     private var totalDetections = 0
     
-    // Sistema de estabilización para evitar parpadeo de alertas (MUY RELAJADO)
+    // Sistema de estabilización simplificado
     private val detectionHistory = mutableMapOf<String, MutableList<Long>>()
-    private val STABILITY_WINDOW_MS = 1000L // 1 segundo (reducido)
-    private val MIN_CONSISTENT_DETECTIONS = 1 // Solo 1 detección necesaria (casi sin filtro)
+    private val STABILITY_WINDOW_MS = 500L // 0.5 segundos
+    private val MIN_CONSISTENT_DETECTIONS = 1 // Solo 1 detección
     
     // Verificar si una detección es estable
     private fun isStableDetection(className: String): Boolean {
@@ -634,6 +631,35 @@ class YoloDetectorTfLite(private val context: Context) {
         return "Ventana: ${STABILITY_WINDOW_MS}ms, Mín detecciones: $MIN_CONSISTENT_DETECTIONS"
     }
     
+    // Método para diagnosticar el estado del detector
+    fun getDiagnosticInfo(): String {
+        return buildString {
+            appendLine("=== YOLO DETECTOR DIAGNOSTICS ===")
+            appendLine("Initialized: $isInitialized")
+            appendLine("Interpreter: ${interpreter != null}")
+            appendLine("Model file: $MODEL_FILENAME")
+            appendLine("Labels loaded: ${labels.size} (${labels.joinToString(", ")})")
+            appendLine("Confidence threshold: $CONFIDENCE_THRESHOLD")
+            appendLine("Input size: $INPUT_SIZE")
+            appendLine("Max detections: $MAX_DETECTION")
+            appendLine("Current detection stats: $detectionStats")
+            appendLine("Total detections: $totalDetections")
+        }
+    }
+    
+    // Método para generar detecciones fake para testing
+    fun generateTestDetection(): List<TfLiteDetection> {
+        Log.d(TAG, "🧪 Generando detección de prueba...")
+        return listOf(
+            TfLiteDetection(
+                bbox = RectF(100f, 100f, 300f, 300f),
+                confidence = 0.75f,
+                classId = 4, // Pepsi
+                className = "Pepsi"
+            )
+        )
+    }
+
     fun close() {
         interpreter?.close()
         interpreter = null

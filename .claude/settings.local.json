@@ -6,7 +6,13 @@
       "Bash(rm:*)",
       "Bash(gradlew:*)",
       "Bash(.gradlew.bat assembleDebug)",
-      "Bash(./gradlew:*)"
+      "Bash(./gradlew:*)",
+      "Bash(mkdir:*)",
+      "Bash(java:*)",
+      "Bash(where java)",
+      "Bash(copy MainActivity.kt MainActivity_Original_Backup.kt)",
+      "Bash(cp:*)",
+      "Bash(where javac)"
     ],
     "deny": [],
     "ask": []
