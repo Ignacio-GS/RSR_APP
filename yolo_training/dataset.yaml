@@ -1,0 +1,20 @@
+# Dataset configuration for PepsiCo Products Detection
+# YOLOv8 format
+
+# Rutas del dataset
+path: ./dataset  # ruta raíz del dataset
+train: images/train  # ruta de imágenes de entrenamiento (relativa a 'path')
+val: images/val  # ruta de imágenes de validación (relativa a 'path')
+
+# Número de clases
+nc: 7
+
+# Nombres de las clases
+names:
+  0: 7up
+  1: Cheetos
+  2: Manzanita Sol
+  3: Mirinda
+  4: Pepsi
+  5: Pepsi Black
+  6: Squirt

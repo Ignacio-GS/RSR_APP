@@ -1,0 +1,33 @@
+# Python
+yolo_env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Dataset
+dataset/
+
+# Training outputs
+runs/
+*.pt
+*.onnx
+*.tflite
+*.torchscript
+*.engine
+
+# Logs
+*.log
+wandb/
+tensorboard/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
