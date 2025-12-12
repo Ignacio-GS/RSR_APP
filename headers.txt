@@ -1,0 +1,13 @@
+HTTP/1.1 200 OK
+Server: ZenZGA/2.4
+Date: Mon, 08 Sep 2025 20:09:26 GMT
+Content-Type: application/json
+Content-Length: 224
+Connection: keep-alive
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-LOG-ID: 20250909040926f5a9ceb854624dcc
+x-process-time: 0.5489850044250488
+Strict-Transport-Security: max-age=31536000; includeSubDomains
+
