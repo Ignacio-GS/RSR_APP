@@ -102,6 +102,11 @@ dependencies {
     // 5) Accompanist Permissions
     // -------------------------------------
     implementation("com.google.accompanist:accompanist-permissions:0.37.3")
+    
+    // -------------------------------------
+    // 5b) Coil for image loading
+    // -------------------------------------
+    implementation("io.coil-kt:coil-compose:2.7.0")
 
     // -------------------------------------
     // 6) Firebase BoM + Firestore + Analytics
@@ -127,7 +132,12 @@ dependencies {
     kapt("androidx.room:room-compiler:$roomVersion")
 
     // -------------------------------------
-    // 9) Testing & Debug
+    // 9) Dependency Injection (Manual temporalmente)
+    // -------------------------------------
+    // Hilt temporalmente deshabilitado por compatibilidad
+
+    // -------------------------------------
+    // 10) Testing & Debug
     // -------------------------------------
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

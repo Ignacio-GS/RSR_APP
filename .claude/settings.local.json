@@ -12,7 +12,8 @@
       "Bash(where java)",
       "Bash(copy MainActivity.kt MainActivity_Original_Backup.kt)",
       "Bash(cp:*)",
-      "Bash(where javac)"
+      "Bash(where javac)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

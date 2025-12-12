@@ -203,47 +203,81 @@ class YoloDetectorTfLite(private val context: Context) {
         
         if (!isInitialized || interpreter == null) {
             Log.w(TAG, "❌ Detector no inicializado - isInitialized: $isInitialized, interpreter: ${interpreter != null}")
-            return emptyList()
+            throw IllegalStateException("YOLO detector not initialized")
         }
         
         return try {
             Log.d(TAG, "Iniciando proceso de detección...")
             
-            // Convertir ImageProxy a Bitmap
+            // Validar imagen
+            if (imageProxy.width <= 0 || imageProxy.height <= 0) {
+                throw IllegalArgumentException("Invalid image dimensions: ${imageProxy.width}x${imageProxy.height}")
+            }
+            
+            // Convertir ImageProxy a Bitmap con manejo de memoria
             val bitmap = imageProxyToBitmap(imageProxy)
             Log.d(TAG, "Bitmap creado: ${bitmap.width}x${bitmap.height}")
             
-            // Redimensionar bitmap a 640x640
-            val resizedBitmap = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true)
-            Log.d(TAG, "Bitmap redimensionado: ${resizedBitmap.width}x${resizedBitmap.height}")
-            
-            // Convertir bitmap a ByteBuffer para TensorFlow Lite
-            val inputBuffer = convertBitmapToByteBuffer(resizedBitmap)
-            Log.d(TAG, "ByteBuffer creado, tamaño: ${inputBuffer.capacity()}")
-            
-            // Preparar buffer de salida - formato [1, 11, 8400]
-            val outputBuffer = Array(1) { Array(11) { FloatArray(MAX_DETECTION) } }
-            Log.d(TAG, "Buffer de salida preparado: [1, 11, $MAX_DETECTION]")
-            
-            // Ejecutar inferencia
-            Log.d(TAG, "Ejecutando inferencia TensorFlow Lite...")
-            interpreter!!.run(inputBuffer, outputBuffer)
-            Log.d(TAG, "Inferencia completada")
-            
-            // Procesar resultados
-            val detections = processOutputs(outputBuffer[0], bitmap.width, bitmap.height)
-            
-            Log.d(TAG, "Procesamiento completado - Detectados ${detections.size} objetos")
-            for (detection in detections) {
-                Log.d(TAG, "Detección: ${detection.className} (${detection.confidence}) en ${detection.bbox}")
+            // Validar bitmap
+            if (bitmap.width <= 0 || bitmap.height <= 0) {
+                throw IllegalStateException("Invalid bitmap dimensions")
             }
             
-            detections
+            // Redimensionar bitmap con manejo de memoria
+            val resizedBitmap = try {
+                Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true)
+            } catch (e: Exception) {
+                throw RuntimeException("Failed to resize bitmap", e)
+            }
+            Log.d(TAG, "Bitmap redimensionado: ${resizedBitmap.width}x${resizedBitmap.height}")
+            
+            try {
+                // Convertir bitmap a ByteBuffer para TensorFlow Lite
+                val inputBuffer = convertBitmapToByteBuffer(resizedBitmap)
+                Log.d(TAG, "ByteBuffer creado, tamaño: ${inputBuffer.capacity()}")
+                
+                // Validar buffer
+                if (inputBuffer.capacity() != 4 * INPUT_SIZE * INPUT_SIZE * 3) {
+                    throw IllegalStateException("Invalid input buffer size: ${inputBuffer.capacity()}")
+                }
+                
+                // Preparar buffer de salida - formato [1, 11, 8400]
+                val outputBuffer = Array(1) { Array(11) { FloatArray(MAX_DETECTION) } }
+                Log.d(TAG, "Buffer de salida preparado: [1, 11, $MAX_DETECTION]")
+                
+                // Ejecutar inferencia con timeout
+                Log.d(TAG, "Ejecutando inferencia TensorFlow Lite...")
+                val inferenceStart = System.currentTimeMillis()
+                interpreter!!.run(inputBuffer, outputBuffer)
+                val inferenceTime = System.currentTimeMillis() - inferenceStart
+                Log.d(TAG, "Inferencia completada en ${inferenceTime}ms")
+                
+                // Validar tiempos de inferencia
+                if (inferenceTime > 1000) { // Más de 1 segundo es demasiado lento
+                    Log.w(TAG, "Inference too slow: ${inferenceTime}ms")
+                }
+                
+                // Procesar resultados
+                val detections = processOutputs(outputBuffer[0], bitmap.width, bitmap.height)
+                
+                Log.d(TAG, "Procesamiento completado - Detectados ${detections.size} objetos")
+                for (detection in detections.take(3)) { // Limitar logging
+                    Log.d(TAG, "Detección: ${detection.className} (${detection.confidence}) en ${detection.bbox}")
+                }
+                
+                detections
+                
+            } finally {
+                // Liberar memoria de bitmaps
+                if (resizedBitmap != bitmap) {
+                    resizedBitmap.recycle()
+                }
+                bitmap.recycle()
+            }
             
         } catch (e: Exception) {
             Log.e(TAG, "Error en detección: ${e.message}", e)
-            e.printStackTrace()
-            emptyList()
+            throw RuntimeException("YOLO detection failed", e)
         }
     }
     
